@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>AI Citation Test (Admin) // Floorline AI</title>
+<style>
+  :root {
+    --bg: #060a12; --panel: #0d1420; --panel-2: #111a29; --border: #1c2837;
+    --green: #00e08a; --teal: #2dd4bf; --text: #e7edf5; --muted: #8493a8; --red: #ff5c6c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 40px 20px 80px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .warn { background: rgba(255,92,108,0.08); border: 1px solid rgba(255,92,108,0.3); color: #ffb3ba; padding: 12px 14px; border-radius: 10px; font-size: 13px; margin: 16px 0 28px; line-height: 1.5; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 16px 0 6px; }
+  input { width: 100%; background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 12px 14px; border-radius: 8px; font-size: 14px; outline: none; }
+  input:focus { border-color: var(--green); }
+  button { margin-top: 22px; background: var(--green); color: #06110c; border: none; padding: 13px 22px; border-radius: 8px; font-weight: 700; font-size: 14.5px; cursor: pointer; }
+  button:disabled { opacity: 0.6; }
+  #status { color: var(--muted); font-size: 13.5px; margin-top: 16px; display: none; }
+  #status.show { display: block; }
+  #error { display: none; margin-top: 16px; padding: 12px 14px; border-radius: 8px; background: rgba(255,92,108,0.08); border: 1px solid rgba(255,92,108,0.3); color: #ffb3ba; font-size: 13.5px; }
+  #error.show { display: block; }
+  #results { margin-top: 30px; display: none; }
+  #results.show { display: block; }
+  .summary { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 20px; font-size: 14px; }
+  .engine-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 12px; }
+  .engine-card .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .engine-name { font-weight: 700; font-size: 14.5px; }
+  .pill { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+  .pill.yes { background: rgba(0,224,138,0.12); color: var(--green); }
+  .pill.no { background: rgba(255,92,108,0.12); color: var(--red); }
+  .pill.off { background: var(--panel-2); color: var(--muted); }
+  .snippet { font-size: 13.5px; color: var(--text); line-height: 1.5; margin-top: 6px; font-style: italic; }
+  .cite { font-size: 12.5px; color: var(--teal); margin-top: 6px; word-break: break-all; }
+  .errtext { font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AI Citation Test — Admin</h1>
+  <div class="warn">Internal tool — not linked from the public audit page. Each run calls up to 4 paid AI APIs. Only use this for a client you're actively auditing, not for casual testing.</div>
+
+  <form id="f">
+    <label>Access key</label>
+    <input type="password" id="key" placeholder="ADMIN_KEY" />
+
+    <label>Question to ask each AI engine</label>
+    <input type="text" id="question" placeholder="e.g. best senior placement agency in Gilbert AZ" />
+
+    <label>Business name to look for in the answer</label>
+    <input type="text" id="businessName" placeholder="e.g. Aspen Placement" />
+
+    <label>Business domain (optional — checks if it's cited with a link)</label>
+    <input type="text" id="domain" placeholder="e.g. aspenplacement.com" />
+
+    <button type="submit" id="btn">Run Citation Test</button>
+  </form>
+
+  <div id="status">Querying ChatGPT, Claude, Perplexity, and Gemini…</div>
+  <div id="error"></div>
+  <div id="results"></div>
+</div>
+
+<script>
+(function () {
+  const f = document.getElementById("f");
+  const keyInput = document.getElementById("key");
+  const btn = document.getElementById("btn");
+  const statusEl = document.getElementById("status");
+  const errorEl = document.getElementById("error");
+  const resultsEl = document.getElementById("results");
+
+  const savedKey = localStorage.getItem("floorline_admin_key");
+  if (savedKey) keyInput.value = savedKey;
+
+  f.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const key = keyInput.value.trim();
+    const question = document.getElementById("question").value.trim();
+    const businessName = document.getElementById("businessName").value.trim();
+    const domain = document.getElementById("domain").value.trim();
+
+    if (!key || !question || !businessName) {
+      showError("Access key, question, and business name are all required.");
+      return;
+    }
+    localStorage.setItem("floorline_admin_key", key);
+
+    errorEl.classList.remove("show");
+    resultsEl.classList.remove("show");
+    statusEl.classList.add("show");
+    btn.disabled = true;
+
+    try {
+      const params = new URLSearchParams({ key, question, businessName, domain });
+      const res = await fetch("/api/aeo-citation-test?" + params.toString());
+      const data = await res.json();
+      if (!res.ok) {
+        showError(data.error || "Request failed.");
+        return;
+      }
+      render(data);
+    } catch (err) {
+      showError("Network error calling the citation test endpoint.");
+    } finally {
+      statusEl.classList.remove("show");
+      btn.disabled = false;
+    }
+  });
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.classList.add("show");
+  }
+
+  function render(data) {
+    resultsEl.innerHTML = "";
+
+    const summary = document.createElement("div");
+    summary.className = "summary";
+    summary.textContent = data.summary.providersConfigured
+      ? "Cited by " + data.summary.providersMentioning + " of " + data.summary.providersConfigured + " configured engines (" + data.summary.citationRate + "%)."
+      : "No provider API keys are configured on this deployment yet.";
+    resultsEl.appendChild(summary);
+
+    data.results.forEach(function (r) {
+      const card = document.createElement("div");
+      card.className = "engine-card";
+      let pill = '<span class="pill off">Not configured</span>';
+      if (r.configured && r.error) pill = '<span class="pill off">Error</span>';
+      else if (r.configured) pill = r.mentioned ? '<span class="pill yes">Mentioned</span>' : '<span class="pill no">Not mentioned</span>';
+
+      let inner = '<div class="top"><span class="engine-name">' + escapeHtml(r.engine) + "</span>" + pill + "</div>";
+      if (r.error) inner += '<div class="errtext">' + escapeHtml(r.error) + "</div>";
+      if (r.snippet) inner += '<div class="snippet">"' + escapeHtml(r.snippet) + '"</div>';
+      if (r.citedWithLink) inner += '<div class="cite">✓ Cited with a direct link to the domain</div>';
+      if (r.citations && r.citations.length) {
+        inner += '<div class="cite">Sources: ' + r.citations.map((c) => escapeHtml(c.url)).join(", ") + "</div>";
+      }
+      card.innerHTML = inner;
+      resultsEl.appendChild(card);
+    });
+
+    resultsEl.classList.add("show");
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+})();
+</script>
+</body>
+</html>
