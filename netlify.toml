@@ -1,0 +1,5 @@
+[build]
+  publish = "."
+
+# The edge function registers its own route via `export const config = { path: "/api/aeo-audit" }`
+# in netlify/edge-functions/aeo-audit.js — no [[edge_functions]] block needed here.
