@@ -4,6 +4,13 @@
 // No LLM calls, no external API keys required — this endpoint has zero
 // per-request cost beyond the Netlify Edge Function invocation itself.
 //
+// Every completed scan is also saved to Netlify Blobs under a short id and
+// returned as `reportId`, so the frontend can build a shareable, read-only
+// link at /report.html?id=<reportId> (served by aeo-report.js). Storage is
+// best-effort: if Blobs isn't provisioned or a write fails, the scan itself
+// still returns normally, just without a reportId.
+import { getStore } from "@netlify/blobs";
+//
 // ---------------------------------------------------------------------------
 // The pure logic below (BOTS through computeScore) is copied verbatim from a
 // unit-tested module (18/18 passing: root-level robots.txt parsing incl.
@@ -352,7 +359,7 @@ export default async (request) => {
     homepageFetchFailed,
   });
 
-  return json({
+  const result = {
     url: origin,
     robotsTxtFound: !!robotsTxt,
     homepageFetchFailed,
@@ -363,7 +370,20 @@ export default async (request) => {
     edgeBlock,
     score,
     generatedAt: new Date().toISOString(),
-  });
+  };
+
+  let reportId = null;
+  try {
+    reportId = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
+    const store = getStore("aeo-reports");
+    await store.setJSON(reportId, result);
+  } catch {
+    // Storage is best-effort. A Blobs failure (not provisioned, transient
+    // error) should never break the scan itself — just no shareable link.
+    reportId = null;
+  }
+
+  return json({ ...result, reportId });
 };
 
 function json(body, status = 200) {
