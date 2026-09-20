@@ -132,6 +132,17 @@
   .schema-tags .none { color: var(--muted); font-style: italic; }
 
   footer { margin-top: 50px; color: var(--muted); font-size: 12.5px; text-align: center; }
+
+  .share-row { display: flex; gap: 10px; margin: 4px 0 10px; flex-wrap: wrap; }
+  .share-row button { background: var(--panel); color: var(--text); border: 1px solid var(--border); padding: 10px 16px; border-radius: 8px; font-size: 13.5px; cursor: pointer; }
+  .share-row button:hover { border-color: var(--green); }
+
+  @media print {
+    body { background: #ffffff; color: #111826; }
+    form, .hint, .share-row { display: none; }
+    .score-card, .subscore, .finding, table, .llms-note { background: #f4f6f9; border-color: #d7dde6; color: #111826; }
+    .mark { background: linear-gradient(135deg, #00b56e, #17a89a); }
+  }
 </style>
 </head>
 <body>
@@ -154,6 +165,10 @@
   <div id="error"></div>
 
   <div id="results">
+    <div class="share-row" id="share-row" style="display:none">
+      <button id="share-btn">Copy shareable link</button>
+      <button id="print-btn">Print / Save as PDF</button>
+    </div>
     <div class="score-card">
       <div class="ring" id="score-ring"><span id="score-num">0</span></div>
       <div class="score-meta">
@@ -273,6 +288,18 @@
     return "var(--red)";
   }
 
+  document.getElementById("print-btn")?.addEventListener("click", function () { window.print(); });
+  document.getElementById("share-btn")?.addEventListener("click", function (e) {
+    const url = e.target.dataset.reportUrl;
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(function () {
+      const btn = e.target;
+      const original = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(function () { btn.textContent = original; }, 1500);
+    });
+  });
+
   function renderResults(data) {
     const score = data.score;
 
@@ -344,6 +371,16 @@
     }
 
     resultsEl.classList.add("show");
+
+    const shareRow = document.getElementById("share-row");
+    const shareBtn = document.getElementById("share-btn");
+    if (data.reportId) {
+      const reportUrl = location.origin + "/report.html?id=" + encodeURIComponent(data.reportId);
+      shareBtn.dataset.reportUrl = reportUrl;
+      shareRow.style.display = "flex";
+    } else {
+      shareRow.style.display = "none";
+    }
   }
 
   function setSub(prefix, value, max) {
