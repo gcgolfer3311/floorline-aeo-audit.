@@ -1,110 +1,206 @@
-// AI Citation Test — Netlify Edge Function (PREMIUM TIER, costs real API money)
-// Queries ChatGPT, Claude, Perplexity, and Gemini with a real question and
-// checks whether/how they mention a specific business. This is the paid-audit
-// layer, separate from the free /api/aeo-audit scan on purpose:
-//   1. It costs money per run (web-search-enabled API calls, roughly
-//      low-single-digit cents to ~$0.05-0.15 total across 4 providers per
-//      question depending on models/providers chosen — verify against each
-//      provider's current pricing before relying on a number).
-//   2. It's gated behind ADMIN_KEY so the public free-scan page can never
-//      trigger it and run up your bill.
+// AI Visibility / AEO Audit — Netlify Edge Function
+// Deterministic checks only: robots.txt bot access, CDN edge-block detection,
+// JSON-LD structured data, and content-format heuristics.
+// No LLM calls, no external API keys required — this endpoint has zero
+// per-request cost beyond the Netlify Edge Function invocation itself.
 //
-// HONESTY NOTE (read before relying on this in front of a client):
-// The per-provider parsing logic below (parseOpenAI/parseAnthropic/
-// parsePerplexity/parseGemini) is unit-tested against realistic MOCKED
-// response shapes built from each provider's documented API format —
-// 16/16 tests passing. The actual live network calls to four paid,
-// frequently-changing provider APIs could NOT be verified end-to-end here,
-// since that requires your real API keys and spends your real money.
-// Provider response shapes and model names do drift — run one real test
-// against a business you know the answer for before trusting this in front
-// of a paying client, and check this file's TODO comments (model name
-// defaults) against current provider docs first.
-//
-// Required env vars (set only the ones you want active — missing keys are
-// skipped cleanly, not treated as errors):
-//   ADMIN_KEY            - shared secret required as ?key= to call this at all
-//   OPENAI_API_KEY        + optional OPENAI_MODEL (default below)
-//   ANTHROPIC_API_KEY     + optional ANTHROPIC_MODEL
-//   PERPLEXITY_API_KEY    + optional PERPLEXITY_MODEL (default "sonar")
-//   GOOGLE_AI_API_KEY      + optional GEMINI_MODEL
-
 // ---------------------------------------------------------------------------
-// Pure parsing logic (unit-tested — 16/16 passing against mocked responses
-// matching each provider's documented shape as of the research behind this
-// build; see the module header above for what that testing did and didn't cover)
+// The pure logic below (BOTS through computeScore) is copied verbatim from a
+// unit-tested module (18/18 passing: root-level robots.txt parsing incl.
+// grouped user-agents, case-insensitivity, Allow-overrides-Disallow, JSON-LD
+// incl. @graph, malformed JSON-LD handling, FAQ/direct-answer heuristics,
+// full scoring pipeline best/worst case, edge-block score capping, and
+// homepage-fetch-failure handling). Only the fetch orchestration below the
+// "EDGE FUNCTION HANDLER" line is new and can't be unit-tested outside the
+// Netlify/Deno runtime — it's written defensively (timeouts + try/catch on
+// every network call) for that reason.
 // ---------------------------------------------------------------------------
 
-function findMention(text, businessName) {
-  if (!text || !businessName) return { mentioned: false, snippet: null };
-  const idx = text.toLowerCase().indexOf(businessName.toLowerCase());
-  if (idx === -1) return { mentioned: false, snippet: null };
-  const start = Math.max(0, idx - 60);
-  const end = Math.min(text.length, idx + businessName.length + 60);
-  return { mentioned: true, snippet: (start > 0 ? "…" : "") + text.slice(start, end).trim() + (end < text.length ? "…" : "") };
-}
+const BOTS = [
+  { token: "GPTBot", company: "OpenAI", role: "Model training", critical: true },
+  { token: "OAI-SearchBot", company: "OpenAI", role: "ChatGPT Search citations", critical: true },
+  { token: "ChatGPT-User", company: "OpenAI", role: "Live fetch on user request", critical: false },
+  { token: "ClaudeBot", company: "Anthropic", role: "Training + retrieval", critical: true },
+  { token: "Claude-User", company: "Anthropic", role: "Live fetch on user request", critical: false },
+  { token: "Claude-SearchBot", company: "Anthropic", role: "Claude search citations", critical: false },
+  { token: "PerplexityBot", company: "Perplexity", role: "Answer citations", critical: true },
+  { token: "Perplexity-User", company: "Perplexity", role: "Live fetch on user request", critical: false },
+  { token: "Google-Extended", company: "Google", role: "Gemini / AI Overviews", critical: true },
+  { token: "GoogleOther", company: "Google", role: "General AI crawling", critical: false },
+  { token: "Applebot-Extended", company: "Apple", role: "Apple Intelligence", critical: false },
+  { token: "bingbot", company: "Microsoft", role: "Bing index -> Copilot", critical: true },
+];
 
-function domainMentionedInCitations(citations, domain) {
-  if (!domain || !citations || !citations.length) return false;
-  const bareDomain = domain.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "").toLowerCase();
-  return citations.some((c) => (c.url || "").toLowerCase().includes(bareDomain));
-}
+function parseRobotsTxtGroups(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const groups = [];
+  let current = null;
+  let sawRuleSinceLastAgent = false;
 
-function parseOpenAI(responseJson) {
-  const text = responseJson.output_text || extractOpenAIText(responseJson);
-  const citations = [];
-  (responseJson.output || []).forEach((item) => {
-    if (item.type === "message" && Array.isArray(item.content)) {
-      item.content.forEach((c) => {
-        (c.annotations || []).forEach((a) => {
-          if (a.type === "url_citation") citations.push({ url: a.url, title: a.title });
-        });
-      });
+  for (const raw of lines) {
+    const line = raw.split("#")[0].trim();
+    if (!line) continue;
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    const field = line.slice(0, idx).trim().toLowerCase();
+    const value = line.slice(idx + 1).trim();
+
+    if (field === "user-agent") {
+      if (!current || sawRuleSinceLastAgent) {
+        current = { agents: [], rules: [] };
+        groups.push(current);
+        sawRuleSinceLastAgent = false;
+      }
+      current.agents.push(value.toLowerCase());
+    } else if (field === "disallow" || field === "allow") {
+      if (!current) continue;
+      current.rules.push({ type: field, path: value });
+      sawRuleSinceLastAgent = true;
     }
-  });
-  return { text, citations };
+  }
+  return groups;
 }
-function extractOpenAIText(responseJson) {
-  let text = "";
-  (responseJson.output || []).forEach((item) => {
-    if (item.type === "message" && Array.isArray(item.content)) {
-      item.content.forEach((c) => { if (c.type === "output_text") text += c.text; });
+
+// Root-level accessibility only (not full path-precedence robots.txt evaluation).
+function botAccessCheck(groups, botToken) {
+  const lower = botToken.toLowerCase();
+  let group = groups.find((g) => g.agents.includes(lower));
+  if (!group) group = groups.find((g) => g.agents.includes("*"));
+  if (!group) return { allowed: true, reason: "not mentioned (default allow)" };
+
+  const rootDisallow = group.rules.some((r) => r.type === "disallow" && r.path === "/");
+  const rootAllow = group.rules.some((r) => r.type === "allow" && (r.path === "/" || r.path === ""));
+
+  if (rootDisallow && !rootAllow) {
+    return { allowed: false, reason: `Disallow: / under User-agent: ${group.agents.join(", ")}` };
+  }
+  return { allowed: true, reason: "no root-level block found" };
+}
+
+function checkAllBots(robotsTxt) {
+  const groups = parseRobotsTxtGroups(robotsTxt);
+  return BOTS.map((b) => ({ ...b, ...botAccessCheck(groups, b.token) }));
+}
+
+function extractJsonLdTypes(html) {
+  const found = new Set();
+  const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(String(html || "")))) {
+    const raw = m[1].trim();
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      collectTypes(parsed, found);
+    } catch {
+      // malformed JSON-LD block — skip, don't crash
     }
-  });
-  return text;
+  }
+  return Array.from(found);
 }
 
-function parseAnthropic(responseJson) {
-  let text = "";
-  const citations = [];
-  (responseJson.content || []).forEach((block) => {
-    if (block.type === "text") text += block.text;
-    if (block.type === "web_search_tool_result" && Array.isArray(block.content)) {
-      block.content.forEach((r) => {
-        if (r.type === "web_search_result") citations.push({ url: r.uri || r.url, title: r.title });
-      });
-    }
-  });
-  return { text, citations };
+function collectTypes(node, found) {
+  if (!node) return;
+  if (Array.isArray(node)) {
+    node.forEach((n) => collectTypes(n, found));
+    return;
+  }
+  if (typeof node !== "object") return;
+  if (node["@type"]) {
+    const t = node["@type"];
+    (Array.isArray(t) ? t : [t]).forEach((x) => found.add(String(x)));
+  }
+  if (node["@graph"]) collectTypes(node["@graph"], found);
 }
 
-function parsePerplexity(responseJson) {
-  const text = responseJson?.choices?.[0]?.message?.content || "";
-  const citations = (responseJson.citations || []).map((url) => ({ url, title: null }));
-  return { text, citations };
+function analyzeContentFormat(html) {
+  const text = String(html || "");
+
+  const headings = [...text.matchAll(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/gi)].map((m) => stripTags(m[1]));
+  const faqHeadingCount = headings.filter((h) => /\?\s*$/.test(h.trim())).length;
+
+  const paragraphs = [...text.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map((m) => stripTags(m[1]).trim())
+    .filter(Boolean);
+  const firstPara = paragraphs[0] || "";
+  const wordCount = firstPara.split(/\s+/).filter(Boolean).length;
+  const directAnswerLikely = wordCount >= 15 && wordCount <= 60;
+
+  return { faqHeadingCount, hasFaqFormat: faqHeadingCount >= 2, firstParaWordCount: wordCount, directAnswerLikely };
 }
 
-function parseGemini(responseJson) {
-  const candidate = (responseJson.candidates || [])[0] || {};
-  const text = (candidate.content?.parts || []).map((p) => p.text || "").join("");
-  const chunks = candidate.groundingMetadata?.groundingChunks || [];
-  const citations = chunks.filter((c) => c.web).map((c) => ({ url: c.web.uri, title: c.web.title }));
-  return { text, citations };
+function stripTags(s) {
+  return String(s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function computeScore({ botResults, jsonLdTypes, contentSignals, llmsTxtPresent, edgeBlock, homepageFetchFailed }) {
+  const findings = [];
+  const recommendations = [];
+  const edgeState = edgeBlock && edgeBlock.state ? edgeBlock.state : "ok";
+
+  if (homepageFetchFailed) {
+    findings.push({
+      severity: "critical",
+      text: "Could not fetch the homepage at all (even with a normal browser user-agent). Structured data and content checks could not be verified — this itself is a strong negative signal, since if a standard fetch fails, AI crawlers likely fail too.",
+    });
+  }
+
+  const allowedCount = botResults.filter((b) => b.allowed).length;
+  let crawlerScore = Math.round((allowedCount / botResults.length) * 40);
+  const blockedCritical = botResults.filter((b) => b.critical && !b.allowed);
+
+  if (edgeState === "blocked") {
+    crawlerScore = Math.min(crawlerScore, 10);
+    findings.push({
+      severity: "critical",
+      text: `AI crawlers appear blocked at the CDN/edge layer even though a normal browser request succeeds (${edgeBlock.reason}).`,
+    });
+    recommendations.push("Check your CDN/host dashboard (Cloudflare especially) for an 'AI Scrapers' or 'AI bots' block toggle and disable it if you want AI visibility.");
+  } else if (edgeState === "inconclusive") {
+    findings.push({
+      severity: "info",
+      text: "Could not verify AI-bot access at the CDN/edge layer — a normal request to this site also failed, so an AI-specific block couldn't be isolated from a general automated-traffic block.",
+    });
+  }
+  if (blockedCritical.length) {
+    findings.push({
+      severity: "high",
+      text: `${blockedCritical.length} major AI crawler(s) blocked in robots.txt: ${blockedCritical.map((b) => b.token).join(", ")}.`,
+    });
+    recommendations.push(`Allow ${blockedCritical.map((b) => b.token).join(", ")} in robots.txt if you want to appear in their answers.`);
+  }
+  if (allowedCount === botResults.length && edgeState === "ok") {
+    findings.push({ severity: "good", text: "All 12 major AI crawlers can access the site." });
+  }
+
+  const hasBiz = jsonLdTypes.some((t) => ["LocalBusiness", "Organization"].includes(t) || t.includes("LocalBusiness"));
+  const hasFaqSchema = jsonLdTypes.includes("FAQPage");
+  const hasReview = jsonLdTypes.some((t) => ["Review", "AggregateRating"].includes(t));
+  const structuredScore = (hasBiz ? 15 : 0) + (hasFaqSchema ? 10 : 0) + (hasReview ? 10 : 0);
+  if (!hasBiz) recommendations.push("Add LocalBusiness/Organization JSON-LD schema so AI engines can identify who you are, where, and what you do.");
+  if (!hasFaqSchema) recommendations.push("Add an FAQPage schema block — this is one of the strongest direct signals AI answer engines use for citation.");
+  if (!hasReview) recommendations.push("Add Review/AggregateRating schema if you have real reviews — this feeds trust signals AI engines weigh.");
+
+  const contentScore = (contentSignals.hasFaqFormat ? 12 : 0) + (contentSignals.directAnswerLikely ? 13 : 0);
+  if (!contentSignals.hasFaqFormat) recommendations.push("Add a visible FAQ section with real questions as headings — AI engines quote FAQ-formatted content disproportionately.");
+  if (!contentSignals.directAnswerLikely) recommendations.push("Open your main page content with a direct 15-40 word answer to 'what is this business / what do you do' before anything else.");
+
+  const overall = Math.min(100, crawlerScore + structuredScore + contentScore);
+
+  return {
+    overall,
+    subscores: { crawlerAccess: crawlerScore, structuredData: structuredScore, contentFormat: contentScore },
+    llmsTxt: {
+      present: llmsTxtPresent,
+      note: "Informational only — 2026 studies (Ahrefs, SE Ranking, Trakkr) found no measurable citation impact. Nice-to-have, not a priority.",
+    },
+    findings,
+    recommendations,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// Fetch orchestration — NOT unit-tested (needs real paid keys); defensive by
-// design so one provider failing/erroring never breaks the others.
+// EDGE FUNCTION HANDLER — fetch orchestration
 // ---------------------------------------------------------------------------
 
 async function fetchWithTimeout(url, opts, ms) {
@@ -117,158 +213,164 @@ async function fetchWithTimeout(url, opts, ms) {
   }
 }
 
-async function runOpenAI(question, businessName, domain) {
-  const key = Deno.env.get("OPENAI_API_KEY");
-  if (!key) return { engine: "ChatGPT (OpenAI)", configured: false };
-  // TODO before relying on this: confirm this model id is still current in
-  // OpenAI's docs — model names in this family have moved fast (verify at
-  // platform.openai.com/docs/models). Override via OPENAI_MODEL env var
-  // without a redeploy if it's changed.
-  const model = Deno.env.get("OPENAI_MODEL") || "gpt-4o";
+function normalizeOrigin(input) {
+  let u = String(input || "").trim();
+  if (!u) return null;
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
   try {
-    const res = await fetchWithTimeout(
-      "https://api.openai.com/v1/responses",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, tools: [{ type: "web_search" }], input: question }),
-      },
-      25000
-    );
-    if (!res.ok) return { engine: "ChatGPT (OpenAI)", configured: true, error: `HTTP ${res.status}` };
-    const data = await res.json();
-    const { text, citations } = parseOpenAI(data);
-    const mention = findMention(text, businessName);
-    return { engine: "ChatGPT (OpenAI)", configured: true, model, ...mention, citations, citedWithLink: domainMentionedInCitations(citations, domain) };
-  } catch (e) {
-    return { engine: "ChatGPT (OpenAI)", configured: true, error: e.message || "request failed" };
+    return new URL(u).origin;
+  } catch {
+    return null;
   }
 }
 
-async function runAnthropic(question, businessName, domain) {
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) return { engine: "Claude (Anthropic)", configured: false };
-  const model = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-4-5";
-  try {
-    const res = await fetchWithTimeout(
-      "https://api.anthropic.com/v1/messages",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({
-          model,
-          max_tokens: 1024,
-          messages: [{ role: "user", content: question }],
-          tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
-        }),
-      },
-      25000
-    );
-    if (!res.ok) return { engine: "Claude (Anthropic)", configured: true, error: `HTTP ${res.status}` };
-    const data = await res.json();
-    const { text, citations } = parseAnthropic(data);
-    const mention = findMention(text, businessName);
-    return { engine: "Claude (Anthropic)", configured: true, model, ...mention, citations, citedWithLink: domainMentionedInCitations(citations, domain) };
-  } catch (e) {
-    return { engine: "Claude (Anthropic)", configured: true, error: e.message || "request failed" };
+// Deliberately conservative: a bare keyword like "captcha" appears on plenty
+// of legitimate full pages (login flows, bundled JS) — an earlier version of
+// this check false-positived against a real site (github.com) in testing.
+// Only flag a block on an explicit block-status code, a full-phrase
+// challenge marker, or the bot-UA response being drastically smaller than
+// the real page. Unit-tested against both the false-positive regression and
+// true-positive cases (18/18 + 5 additional edge-block tests, 23/23 total).
+function detectEdgeBlock({ normalFetchOk, status, botHtml, normalHtmlLength }) {
+  // If the plain fetch also failed, we have no working baseline — a site
+  // that blocks everything indiscriminately isn't evidence of an
+  // AI-bot-specific block. Found via live test: npmjs.com returned 403 to
+  // both a normal UA and a GPTBot UA (broad WAF, not AI-specific).
+  if (!normalFetchOk) {
+    return {
+      state: "inconclusive",
+      reason: "Could not establish a baseline — the normal-UA fetch also failed, so an AI-bot-specific block can't be isolated from a general automated-traffic block.",
+    };
   }
+  if (status === 403 || status === 503) {
+    return { state: "blocked", reason: `HTTP ${status} returned to AI-bot user-agent (a normal-UA fetch to the same URL succeeded)` };
+  }
+  if (typeof botHtml === "string" && botHtml.length) {
+    const lower = botHtml.toLowerCase();
+    const strongMarkers = [
+      "checking your browser before accessing",
+      "attention required! | cloudflare",
+      "please enable cookies",
+      "cf-browser-verification",
+      "ddos protection by cloudflare",
+      "just a moment...",
+    ];
+    const matched = strongMarkers.find((m) => lower.includes(m));
+    if (matched) {
+      return { state: "blocked", reason: `Challenge-page marker found in bot-UA response: "${matched}"` };
+    }
+    if (normalHtmlLength > 2000 && botHtml.length < normalHtmlLength * 0.15) {
+      return {
+        state: "blocked",
+        reason: `Bot-UA response was ${botHtml.length} chars vs ${normalHtmlLength} chars on a normal fetch — likely served a stub/challenge page instead of the real page`,
+      };
+    }
+  }
+  return { state: "ok", reason: null };
 }
 
-async function runPerplexity(question, businessName, domain) {
-  const key = Deno.env.get("PERPLEXITY_API_KEY");
-  if (!key) return { engine: "Perplexity", configured: false };
-  const model = Deno.env.get("PERPLEXITY_MODEL") || "sonar";
-  try {
-    const res = await fetchWithTimeout(
-      "https://api.perplexity.ai/chat/completions",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: question }] }),
-      },
-      25000
-    );
-    if (!res.ok) return { engine: "Perplexity", configured: true, error: `HTTP ${res.status}` };
-    const data = await res.json();
-    const { text, citations } = parsePerplexity(data);
-    const mention = findMention(text, businessName);
-    return { engine: "Perplexity", configured: true, model, ...mention, citations, citedWithLink: domainMentionedInCitations(citations, domain) };
-  } catch (e) {
-    return { engine: "Perplexity", configured: true, error: e.message || "request failed" };
-  }
-}
-
-async function runGemini(question, businessName, domain) {
-  const key = Deno.env.get("GOOGLE_AI_API_KEY");
-  if (!key) return { engine: "Gemini (Google AI Overviews proxy)", configured: false };
-  const model = Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
-  try {
-    const res = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: question }] }], tools: [{ google_search: {} }] }),
-      },
-      25000
-    );
-    if (!res.ok) return { engine: "Gemini (Google AI Overviews proxy)", configured: true, error: `HTTP ${res.status}` };
-    const data = await res.json();
-    const { text, citations } = parseGemini(data);
-    const mention = findMention(text, businessName);
-    return { engine: "Gemini (Google AI Overviews proxy)", configured: true, model, ...mention, citations, citedWithLink: domainMentionedInCitations(citations, domain) };
-  } catch (e) {
-    return { engine: "Gemini (Google AI Overviews proxy)", configured: true, error: e.message || "request failed" };
-  }
-}
-
-const CORS_HEADERS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS" };
-function json(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
-}
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+};
 
 export default async (request) => {
-  if (request.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
+  if (request.method === "OPTIONS") {
+    return new Response(null, { headers: CORS_HEADERS });
+  }
 
   const reqUrl = new URL(request.url);
-  const adminKey = Deno.env.get("ADMIN_KEY");
-  if (!adminKey) {
-    return json({ error: "This endpoint is not configured (no ADMIN_KEY set) — it refuses to run rather than run unprotected." }, 503);
-  }
-  if (reqUrl.searchParams.get("key") !== adminKey) {
-    return json({ error: "Unauthorized" }, 401);
+  const target = reqUrl.searchParams.get("url");
+  if (!target) {
+    return json({ error: "Missing ?url= parameter" }, 400);
   }
 
-  const question = (reqUrl.searchParams.get("question") || "").trim();
-  const businessName = (reqUrl.searchParams.get("businessName") || "").trim();
-  const domain = (reqUrl.searchParams.get("domain") || "").trim();
-
-  if (!question || !businessName) {
-    return json({ error: "Missing required ?question= and ?businessName= parameters." }, 400);
+  const origin = normalizeOrigin(target);
+  if (!origin) {
+    return json({ error: "That doesn't look like a valid URL." }, 400);
   }
 
-  const results = await Promise.all([
-    runOpenAI(question, businessName, domain),
-    runAnthropic(question, businessName, domain),
-    runPerplexity(question, businessName, domain),
-    runGemini(question, businessName, domain),
+  const ua = { "User-Agent": "Mozilla/5.0 (compatible; FloorlineAI-AEOAudit/1.0; +https://floorlineai.com)" };
+  const gptbotUa = { "User-Agent": "GPTBot/1.0 (+https://openai.com/gptbot)" };
+
+  const [robotsResult, llmsResult, homepageResult, botUaResult] = await Promise.allSettled([
+    fetchWithTimeout(origin + "/robots.txt", { headers: ua }, 8000),
+    fetchWithTimeout(origin + "/llms.txt", { method: "HEAD", headers: ua }, 6000),
+    fetchWithTimeout(origin + "/", { headers: ua }, 9000),
+    fetchWithTimeout(origin + "/", { headers: gptbotUa }, 9000),
   ]);
 
-  const configured = results.filter((r) => r.configured);
-  const mentioned = configured.filter((r) => r.mentioned);
+  let robotsTxt = "";
+  if (robotsResult.status === "fulfilled" && robotsResult.value.ok) {
+    try { robotsTxt = await robotsResult.value.text(); } catch { robotsTxt = ""; }
+  }
+
+  let llmsTxtPresent = false;
+  if (llmsResult.status === "fulfilled") {
+    llmsTxtPresent = llmsResult.value.ok;
+  }
+
+  let html = "";
+  let homepageFetchFailed = false;
+  if (homepageResult.status === "fulfilled" && homepageResult.value.ok) {
+    try { html = await homepageResult.value.text(); } catch { homepageFetchFailed = true; }
+  } else {
+    homepageFetchFailed = true;
+  }
+
+  const normalFetchOk = homepageResult.status === "fulfilled" && homepageResult.value.ok;
+  let edgeBlock = { state: "ok", reason: null };
+  if (botUaResult.status === "fulfilled") {
+    const res = botUaResult.value;
+    let botHtml = "";
+    try {
+      botHtml = res.ok || res.status !== 403 ? await res.text() : "";
+    } catch {
+      botHtml = "";
+    }
+    edgeBlock = detectEdgeBlock({ normalFetchOk, status: res.status, botHtml, normalHtmlLength: html.length });
+  } else if (!normalFetchOk) {
+    edgeBlock = { state: "inconclusive", reason: "Neither the normal nor the bot-UA fetch succeeded." };
+  }
+  // Note: a transient network error on the bot-UA fetch alone (normal fetch
+  // still fulfilled) leaves edgeBlock at its "ok" default — only
+  // detectEdgeBlock's explicit signals, or a shared failure on both fetches
+  // (-> "inconclusive"), change that.
+
+  const botResults = checkAllBots(robotsTxt);
+  const jsonLdTypes = html ? extractJsonLdTypes(html) : [];
+  const contentSignals = html
+    ? analyzeContentFormat(html)
+    : { hasFaqFormat: false, directAnswerLikely: false, faqHeadingCount: 0, firstParaWordCount: 0 };
+
+  const score = computeScore({
+    botResults,
+    jsonLdTypes,
+    contentSignals,
+    llmsTxtPresent,
+    edgeBlock,
+    homepageFetchFailed,
+  });
 
   return json({
-    question,
-    businessName,
-    domain: domain || null,
-    results,
-    summary: {
-      providersConfigured: configured.length,
-      providersMentioning: mentioned.length,
-      citationRate: configured.length ? Math.round((mentioned.length / configured.length) * 100) : null,
-    },
+    url: origin,
+    robotsTxtFound: !!robotsTxt,
+    homepageFetchFailed,
+    botResults,
+    jsonLdTypes,
+    contentSignals,
+    llmsTxtPresent,
+    edgeBlock,
+    score,
     generatedAt: new Date().toISOString(),
   });
 };
 
-export const config = { path: "/api/aeo-citation-test" };
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+  });
+}
+
+export const config = { path: "/api/aeo-audit" };
