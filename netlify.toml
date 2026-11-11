@@ -1,5 +1,9 @@
 [build]
   publish = "."
 
-# The edge function registers its own route via `export const config = { path: "/api/aeo-audit" }`
-# in netlify/edge-functions/aeo-audit.js — no [[edge_functions]] block needed here.
+# Edge functions register their own routes via `export const config = { path }`:
+#   /api/aeo-audit          free deterministic scan (no paid APIs)
+#   /api/aeo-report         read a saved scan by id
+#   /api/aeo-lead           save a lead, returns a one-time token
+#   /api/aeo-citation-test  live ChatGPT/Claude/Perplexity/Gemini check (PAID APIs, rate-limited)
+# Shared logic: netlify/lib/aeo-core.js (unit tests: `npm test`).

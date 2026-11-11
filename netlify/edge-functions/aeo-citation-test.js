@@ -1,376 +1,116 @@
-// AI Visibility / AEO Audit — Netlify Edge Function
-// Deterministic checks only: robots.txt bot access, CDN edge-block detection,
-// JSON-LD structured data, and content-format heuristics.
-// No LLM calls, no external API keys required — this endpoint has zero
-// per-request cost beyond the Netlify Edge Function invocation itself.
+// AI Visibility Audit — AI citation test — /api/aeo-citation-test
+// Asks ChatGPT, Claude, Perplexity and Gemini a customer-style question and
+// checks whether the business is named or linked in each answer.
 //
-// ---------------------------------------------------------------------------
-// The pure logic below (BOTS through computeScore) is copied verbatim from a
-// unit-tested module (18/18 passing: root-level robots.txt parsing incl.
-// grouped user-agents, case-insensitivity, Allow-overrides-Disallow, JSON-LD
-// incl. @graph, malformed JSON-LD handling, FAQ/direct-answer heuristics,
-// full scoring pipeline best/worst case, edge-block score capping, and
-// homepage-fetch-failure handling). Only the fetch orchestration below the
-// "EDGE FUNCTION HANDLER" line is new and can't be unit-tested outside the
-// Netlify/Deno runtime — it's written defensively (timeouts + try/catch on
-// every network call) for that reason.
-// ---------------------------------------------------------------------------
+// COSTS MONEY: each run makes up to 4 paid API calls. Two ways in:
+//   • Admin  — GET ?key=ADMIN_KEY&question=&businessName=&domain=   (no limits)
+//   • Public — POST {"leadToken": "..."} from /api/aeo-lead            (limited)
+// Public limits: 1 run per lead, 2 runs per email per day, and a global daily
+// cap (env CITATION_DAILY_CAP, default 30). A repeat call with the same lead
+// token returns the saved result instead of spending money again.
+//
+// Env: OPENAI_API_KEY, ANTHROPIC_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY
+// (any subset — missing engines show "Not configured"), ADMIN_KEY, and
+// optional OPENAI_MODEL / ANTHROPIC_MODEL / PERPLEXITY_MODEL / GEMINI_MODEL.
+import { getStore } from "@netlify/blobs";
+import { runCitationTest, PROVIDERS } from "../lib/aeo-core.js";
 
-const BOTS = [
-  { token: "GPTBot", company: "OpenAI", role: "Model training", critical: true },
-  { token: "OAI-SearchBot", company: "OpenAI", role: "ChatGPT Search citations", critical: true },
-  { token: "ChatGPT-User", company: "OpenAI", role: "Live fetch on user request", critical: false },
-  { token: "ClaudeBot", company: "Anthropic", role: "Training + retrieval", critical: true },
-  { token: "Claude-User", company: "Anthropic", role: "Live fetch on user request", critical: false },
-  { token: "Claude-SearchBot", company: "Anthropic", role: "Claude search citations", critical: false },
-  { token: "PerplexityBot", company: "Perplexity", role: "Answer citations", critical: true },
-  { token: "Perplexity-User", company: "Perplexity", role: "Live fetch on user request", critical: false },
-  { token: "Google-Extended", company: "Google", role: "Gemini / AI Overviews", critical: true },
-  { token: "GoogleOther", company: "Google", role: "General AI crawling", critical: false },
-  { token: "Applebot-Extended", company: "Apple", role: "Apple Intelligence", critical: false },
-  { token: "bingbot", company: "Microsoft", role: "Bing index -> Copilot", critical: true },
-];
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
+const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-store" } });
+const env = (k) => { try { return Netlify.env.get(k) || ""; } catch { return ""; } };
 
-function parseRobotsTxtGroups(text) {
-  const lines = String(text || "").split(/\r?\n/);
-  const groups = [];
-  let current = null;
-  let sawRuleSinceLastAgent = false;
-
-  for (const raw of lines) {
-    const line = raw.split("#")[0].trim();
-    if (!line) continue;
-    const idx = line.indexOf(":");
-    if (idx === -1) continue;
-    const field = line.slice(0, idx).trim().toLowerCase();
-    const value = line.slice(idx + 1).trim();
-
-    if (field === "user-agent") {
-      if (!current || sawRuleSinceLastAgent) {
-        current = { agents: [], rules: [] };
-        groups.push(current);
-        sawRuleSinceLastAgent = false;
-      }
-      current.agents.push(value.toLowerCase());
-    } else if (field === "disallow" || field === "allow") {
-      if (!current) continue;
-      current.rules.push({ type: field, path: value });
-      sawRuleSinceLastAgent = true;
-    }
-  }
-  return groups;
+function safeEqual(a, b) {
+  a = String(a || ""); b = String(b || "");
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
-// Root-level accessibility only (not full path-precedence robots.txt evaluation).
-function botAccessCheck(groups, botToken) {
-  const lower = botToken.toLowerCase();
-  let group = groups.find((g) => g.agents.includes(lower));
-  if (!group) group = groups.find((g) => g.agents.includes("*"));
-  if (!group) return { allowed: true, reason: "not mentioned (default allow)" };
-
-  const rootDisallow = group.rules.some((r) => r.type === "disallow" && r.path === "/");
-  const rootAllow = group.rules.some((r) => r.type === "allow" && (r.path === "/" || r.path === ""));
-
-  if (rootDisallow && !rootAllow) {
-    return { allowed: false, reason: `Disallow: / under User-agent: ${group.agents.join(", ")}` };
-  }
-  return { allowed: true, reason: "no root-level block found" };
+async function sha(s) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function checkAllBots(robotsTxt) {
-  const groups = parseRobotsTxtGroups(robotsTxt);
-  return BOTS.map((b) => ({ ...b, ...botAccessCheck(groups, b.token) }));
+const configuredCount = () => PROVIDERS.filter((p) => env(p.keyEnv)).length;
+
+async function bump(store, key) {
+  const cur = (await store.get(key, { type: "json" })) || { n: 0 };
+  cur.n += 1;
+  await store.setJSON(key, cur);
+  return cur.n;
 }
-
-function extractJsonLdTypes(html) {
-  const found = new Set();
-  const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  let m;
-  while ((m = re.exec(String(html || "")))) {
-    const raw = m[1].trim();
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw);
-      collectTypes(parsed, found);
-    } catch {
-      // malformed JSON-LD block — skip, don't crash
-    }
-  }
-  return Array.from(found);
-}
-
-function collectTypes(node, found) {
-  if (!node) return;
-  if (Array.isArray(node)) {
-    node.forEach((n) => collectTypes(n, found));
-    return;
-  }
-  if (typeof node !== "object") return;
-  if (node["@type"]) {
-    const t = node["@type"];
-    (Array.isArray(t) ? t : [t]).forEach((x) => found.add(String(x)));
-  }
-  if (node["@graph"]) collectTypes(node["@graph"], found);
-}
-
-function analyzeContentFormat(html) {
-  const text = String(html || "");
-
-  const headings = [...text.matchAll(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/gi)].map((m) => stripTags(m[1]));
-  const faqHeadingCount = headings.filter((h) => /\?\s*$/.test(h.trim())).length;
-
-  const paragraphs = [...text.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
-    .map((m) => stripTags(m[1]).trim())
-    .filter(Boolean);
-  const firstPara = paragraphs[0] || "";
-  const wordCount = firstPara.split(/\s+/).filter(Boolean).length;
-  const directAnswerLikely = wordCount >= 15 && wordCount <= 60;
-
-  return { faqHeadingCount, hasFaqFormat: faqHeadingCount >= 2, firstParaWordCount: wordCount, directAnswerLikely };
-}
-
-function stripTags(s) {
-  return String(s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function computeScore({ botResults, jsonLdTypes, contentSignals, llmsTxtPresent, edgeBlock, homepageFetchFailed }) {
-  const findings = [];
-  const recommendations = [];
-  const edgeState = edgeBlock && edgeBlock.state ? edgeBlock.state : "ok";
-
-  if (homepageFetchFailed) {
-    findings.push({
-      severity: "critical",
-      text: "Could not fetch the homepage at all (even with a normal browser user-agent). Structured data and content checks could not be verified — this itself is a strong negative signal, since if a standard fetch fails, AI crawlers likely fail too.",
-    });
-  }
-
-  const allowedCount = botResults.filter((b) => b.allowed).length;
-  let crawlerScore = Math.round((allowedCount / botResults.length) * 40);
-  const blockedCritical = botResults.filter((b) => b.critical && !b.allowed);
-
-  if (edgeState === "blocked") {
-    crawlerScore = Math.min(crawlerScore, 10);
-    findings.push({
-      severity: "critical",
-      text: `AI crawlers appear blocked at the CDN/edge layer even though a normal browser request succeeds (${edgeBlock.reason}).`,
-    });
-    recommendations.push("Check your CDN/host dashboard (Cloudflare especially) for an 'AI Scrapers' or 'AI bots' block toggle and disable it if you want AI visibility.");
-  } else if (edgeState === "inconclusive") {
-    findings.push({
-      severity: "info",
-      text: "Could not verify AI-bot access at the CDN/edge layer — a normal request to this site also failed, so an AI-specific block couldn't be isolated from a general automated-traffic block.",
-    });
-  }
-  if (blockedCritical.length) {
-    findings.push({
-      severity: "high",
-      text: `${blockedCritical.length} major AI crawler(s) blocked in robots.txt: ${blockedCritical.map((b) => b.token).join(", ")}.`,
-    });
-    recommendations.push(`Allow ${blockedCritical.map((b) => b.token).join(", ")} in robots.txt if you want to appear in their answers.`);
-  }
-  if (allowedCount === botResults.length && edgeState === "ok") {
-    findings.push({ severity: "good", text: "All 12 major AI crawlers can access the site." });
-  }
-
-  const hasBiz = jsonLdTypes.some((t) => ["LocalBusiness", "Organization"].includes(t) || t.includes("LocalBusiness"));
-  const hasFaqSchema = jsonLdTypes.includes("FAQPage");
-  const hasReview = jsonLdTypes.some((t) => ["Review", "AggregateRating"].includes(t));
-  const structuredScore = (hasBiz ? 15 : 0) + (hasFaqSchema ? 10 : 0) + (hasReview ? 10 : 0);
-  if (!hasBiz) recommendations.push("Add LocalBusiness/Organization JSON-LD schema so AI engines can identify who you are, where, and what you do.");
-  if (!hasFaqSchema) recommendations.push("Add an FAQPage schema block — this is one of the strongest direct signals AI answer engines use for citation.");
-  if (!hasReview) recommendations.push("Add Review/AggregateRating schema if you have real reviews — this feeds trust signals AI engines weigh.");
-
-  const contentScore = (contentSignals.hasFaqFormat ? 12 : 0) + (contentSignals.directAnswerLikely ? 13 : 0);
-  if (!contentSignals.hasFaqFormat) recommendations.push("Add a visible FAQ section with real questions as headings — AI engines quote FAQ-formatted content disproportionately.");
-  if (!contentSignals.directAnswerLikely) recommendations.push("Open your main page content with a direct 15-40 word answer to 'what is this business / what do you do' before anything else.");
-
-  const overall = Math.min(100, crawlerScore + structuredScore + contentScore);
-
-  return {
-    overall,
-    subscores: { crawlerAccess: crawlerScore, structuredData: structuredScore, contentFormat: contentScore },
-    llmsTxt: {
-      present: llmsTxtPresent,
-      note: "Informational only — 2026 studies (Ahrefs, SE Ranking, Trakkr) found no measurable citation impact. Nice-to-have, not a priority.",
-    },
-    findings,
-    recommendations,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// EDGE FUNCTION HANDLER — fetch orchestration
-// ---------------------------------------------------------------------------
-
-async function fetchWithTimeout(url, opts, ms) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    return await fetch(url, { ...opts, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function normalizeOrigin(input) {
-  let u = String(input || "").trim();
-  if (!u) return null;
-  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
-  try {
-    return new URL(u).origin;
-  } catch {
-    return null;
-  }
-}
-
-// Deliberately conservative: a bare keyword like "captcha" appears on plenty
-// of legitimate full pages (login flows, bundled JS) — an earlier version of
-// this check false-positived against a real site (github.com) in testing.
-// Only flag a block on an explicit block-status code, a full-phrase
-// challenge marker, or the bot-UA response being drastically smaller than
-// the real page. Unit-tested against both the false-positive regression and
-// true-positive cases (18/18 + 5 additional edge-block tests, 23/23 total).
-function detectEdgeBlock({ normalFetchOk, status, botHtml, normalHtmlLength }) {
-  // If the plain fetch also failed, we have no working baseline — a site
-  // that blocks everything indiscriminately isn't evidence of an
-  // AI-bot-specific block. Found via live test: npmjs.com returned 403 to
-  // both a normal UA and a GPTBot UA (broad WAF, not AI-specific).
-  if (!normalFetchOk) {
-    return {
-      state: "inconclusive",
-      reason: "Could not establish a baseline — the normal-UA fetch also failed, so an AI-bot-specific block can't be isolated from a general automated-traffic block.",
-    };
-  }
-  if (status === 403 || status === 503) {
-    return { state: "blocked", reason: `HTTP ${status} returned to AI-bot user-agent (a normal-UA fetch to the same URL succeeded)` };
-  }
-  if (typeof botHtml === "string" && botHtml.length) {
-    const lower = botHtml.toLowerCase();
-    const strongMarkers = [
-      "checking your browser before accessing",
-      "attention required! | cloudflare",
-      "please enable cookies",
-      "cf-browser-verification",
-      "ddos protection by cloudflare",
-      "just a moment...",
-    ];
-    const matched = strongMarkers.find((m) => lower.includes(m));
-    if (matched) {
-      return { state: "blocked", reason: `Challenge-page marker found in bot-UA response: "${matched}"` };
-    }
-    if (normalHtmlLength > 2000 && botHtml.length < normalHtmlLength * 0.15) {
-      return {
-        state: "blocked",
-        reason: `Bot-UA response was ${botHtml.length} chars vs ${normalHtmlLength} chars on a normal fetch — likely served a stub/challenge page instead of the real page`,
-      };
-    }
-  }
-  return { state: "ok", reason: null };
-}
-
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-};
 
 export default async (request) => {
-  if (request.method === "OPTIONS") {
-    return new Response(null, { headers: CORS_HEADERS });
+  if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
+
+  // ---------------- Admin mode ----------------
+  if (request.method === "GET") {
+    const p = new URL(request.url).searchParams;
+    const adminKey = env("ADMIN_KEY");
+    if (!adminKey) return json({ error: "ADMIN_KEY is not set on this site." }, 503);
+    if (!safeEqual(p.get("key"), adminKey)) return json({ error: "Invalid access key." }, 401);
+    const question = (p.get("question") || "").trim().slice(0, 200);
+    const businessName = (p.get("businessName") || "").trim().slice(0, 100);
+    const domain = (p.get("domain") || "").trim().slice(0, 200);
+    if (!question || !businessName) return json({ error: "question and businessName are required." }, 400);
+    const result = await runCitationTest({ question, businessName, domain, getEnv: env, fetchImpl: fetch });
+    return json(result);
   }
 
-  const reqUrl = new URL(request.url);
-  const target = reqUrl.searchParams.get("url");
-  if (!target) {
-    return json({ error: "Missing ?url= parameter" }, 400);
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+
+  // ---------------- Public (lead-gated) mode ----------------
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "Invalid request." }, 400); }
+  const token = String((body && body.leadToken) || "");
+  if (!/^[a-f0-9]{32}$/.test(token)) return json({ error: "Missing or invalid access token." }, 400);
+
+  let leads, limits;
+  try {
+    leads = getStore("aeo-leads");
+    limits = getStore("aeo-limits");
+  } catch {
+    return json({ error: "Storage unavailable." }, 503);
+  }
+  const lead = await leads.get(token, { type: "json" });
+  if (!lead) return json({ error: "That link has expired. Run the scan again." }, 404);
+  if (lead.citation) return json({ ...lead.citation, cached: true });
+
+  if (!configuredCount()) {
+    return json({ error: "unavailable", message: "The live AI check is offline right now — we got your request and will send your results personally." }, 503);
   }
 
-  const origin = normalizeOrigin(target);
-  if (!origin) {
-    return json({ error: "That doesn't look like a valid URL." }, 400);
+  const day = new Date().toISOString().slice(0, 10);
+  const cap = Number(env("CITATION_DAILY_CAP")) || 30;
+  const globalKey = `global-${day}`;
+  const emailKey = `email-${await sha(lead.email)}-${day}`;
+  const g = (await limits.get(globalKey, { type: "json" })) || { n: 0 };
+  const e = (await limits.get(emailKey, { type: "json" })) || { n: 0 };
+  if (g.n >= cap) return json({ error: "limit", message: "Today's free AI checks are used up — we got your request and will send your results personally." }, 429);
+  if (e.n >= 2) return json({ error: "limit", message: "You've used today's free AI checks. We'll follow up with the full picture." }, 429);
+
+  // Count before spending, so parallel retries can't overspend.
+  await bump(limits, globalKey);
+  await bump(limits, emailKey);
+
+  const result = await runCitationTest({ question: lead.question, businessName: lead.businessName, domain: lead.url, getEnv: env, fetchImpl: fetch });
+
+  // Every engine failed (outage, bad key): don't burn the lead's one free run.
+  if (!result.summary.providersAnswered) {
+    return json({ error: "engines_failed", message: "The AI engines didn't respond just now — we have your request and will send your results personally.", detail: result.results.map((r) => ({ engine: r.engine, error: r.error || null })) }, 502);
   }
 
-  const ua = { "User-Agent": "Mozilla/5.0 (compatible; FloorlineAI-AEOAudit/1.0; +https://floorlineai.com)" };
-  const gptbotUa = { "User-Agent": "GPTBot/1.0 (+https://openai.com/gptbot)" };
-
-  const [robotsResult, llmsResult, homepageResult, botUaResult] = await Promise.allSettled([
-    fetchWithTimeout(origin + "/robots.txt", { headers: ua }, 8000),
-    fetchWithTimeout(origin + "/llms.txt", { method: "HEAD", headers: ua }, 6000),
-    fetchWithTimeout(origin + "/", { headers: ua }, 9000),
-    fetchWithTimeout(origin + "/", { headers: gptbotUa }, 9000),
-  ]);
-
-  let robotsTxt = "";
-  if (robotsResult.status === "fulfilled" && robotsResult.value.ok) {
-    try { robotsTxt = await robotsResult.value.text(); } catch { robotsTxt = ""; }
-  }
-
-  let llmsTxtPresent = false;
-  if (llmsResult.status === "fulfilled") {
-    llmsTxtPresent = llmsResult.value.ok;
-  }
-
-  let html = "";
-  let homepageFetchFailed = false;
-  if (homepageResult.status === "fulfilled" && homepageResult.value.ok) {
-    try { html = await homepageResult.value.text(); } catch { homepageFetchFailed = true; }
-  } else {
-    homepageFetchFailed = true;
-  }
-
-  const normalFetchOk = homepageResult.status === "fulfilled" && homepageResult.value.ok;
-  let edgeBlock = { state: "ok", reason: null };
-  if (botUaResult.status === "fulfilled") {
-    const res = botUaResult.value;
-    let botHtml = "";
-    try {
-      botHtml = res.ok || res.status !== 403 ? await res.text() : "";
-    } catch {
-      botHtml = "";
+  try {
+    await leads.setJSON(token, { ...lead, citationRuns: (lead.citationRuns || 0) + 1, citation: result });
+    if (lead.reportId) {
+      const reports = getStore("aeo-reports");
+      const rep = await reports.get(lead.reportId, { type: "json" });
+      if (rep) await reports.setJSON(lead.reportId, { ...rep, citation: result });
     }
-    edgeBlock = detectEdgeBlock({ normalFetchOk, status: res.status, botHtml, normalHtmlLength: html.length });
-  } else if (!normalFetchOk) {
-    edgeBlock = { state: "inconclusive", reason: "Neither the normal nor the bot-UA fetch succeeded." };
-  }
-  // Note: a transient network error on the bot-UA fetch alone (normal fetch
-  // still fulfilled) leaves edgeBlock at its "ok" default — only
-  // detectEdgeBlock's explicit signals, or a shared failure on both fetches
-  // (-> "inconclusive"), change that.
+  } catch { /* result still returned */ }
 
-  const botResults = checkAllBots(robotsTxt);
-  const jsonLdTypes = html ? extractJsonLdTypes(html) : [];
-  const contentSignals = html
-    ? analyzeContentFormat(html)
-    : { hasFaqFormat: false, directAnswerLikely: false, faqHeadingCount: 0, firstParaWordCount: 0 };
-
-  const score = computeScore({
-    botResults,
-    jsonLdTypes,
-    contentSignals,
-    llmsTxtPresent,
-    edgeBlock,
-    homepageFetchFailed,
-  });
-
-  return json({
-    url: origin,
-    robotsTxtFound: !!robotsTxt,
-    homepageFetchFailed,
-    botResults,
-    jsonLdTypes,
-    contentSignals,
-    llmsTxtPresent,
-    edgeBlock,
-    score,
-    generatedAt: new Date().toISOString(),
-  });
+  return json(result);
 };
 
-function json(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
-}
-
-export const config = { path: "/api/aeo-audit" };
+export const config = { path: "/api/aeo-citation-test" };
