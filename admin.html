@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Lead Pipeline // Floorline AI</title>
+<style>
+  :root {
+    --bg: #060a12; --panel: #0d1420; --panel-2: #111a29; --border: #1c2837; --border-2: #263548;
+    --green: #00e08a; --teal: #2dd4bf; --text: #e7edf5; --muted: #8493a8;
+    --red: #ff5c6c; --orange: #ffb020; --blue: #5ba8ff; --purple: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: var(--teal); }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 80px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; }
+  .mark { width: 28px; height: 28px; background: linear-gradient(135deg, var(--green), var(--teal)); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); display: flex; align-items: center; justify-content: center; font-weight: 800; color: #06110c; font-size: 13px; }
+  .brand small { color: var(--muted); font-weight: 500; }
+  input, select, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border-2); border-radius: 8px; padding: 9px 11px; font-size: 14px; outline: none; }
+  input:focus, select:focus, textarea:focus { border-color: var(--green); }
+  textarea { width: 100%; resize: vertical; line-height: 1.5; }
+  .btn { background: var(--green); color: #06110c; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 800; font-size: 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .btn.ghost { background: var(--panel-2); color: var(--text); border: 1px solid var(--border-2); font-weight: 600; }
+  .btn.ghost:hover { border-color: var(--green); }
+  .btn.sm { padding: 6px 10px; font-size: 12.5px; }
+  .btn.danger { background: transparent; color: var(--red); border: 1px solid rgba(255,92,108,.4); font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12.5px; }
+  .hidden { display: none !important; }
+  .alert { margin: 12px 0; padding: 12px 14px; border-radius: 10px; font-size: 14px; background: rgba(255,92,108,.08); border: 1px solid rgba(255,92,108,.35); color: #ffc2c8; }
+  .alert.ok { background: rgba(0,224,138,.08); border-color: rgba(0,224,138,.35); color: #b8f5dc; }
+
+  #login { max-width: 420px; margin: 60px auto; }
+  #login h1 { font-size: 20px; margin: 0 0 6px; }
+  #login input { width: 100%; margin: 12px 0; }
+
+  .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; }
+  .tab { background: none; border: none; color: var(--muted); padding: 10px 14px; font: inherit; font-weight: 700; font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .tab.on { color: var(--text); border-bottom-color: var(--green); }
+  .tab .n { background: var(--panel-2); border-radius: 999px; padding: 1px 7px; font-size: 11.5px; margin-left: 4px; color: var(--muted); }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+  .stat.on { border-color: var(--green); }
+  .stat b { display: block; font-size: 22px; }
+  .stat span { color: var(--muted); font-size: 12px; text-transform: capitalize; }
+
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .filters input { flex: 1; min-width: 180px; }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
+  .card .head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+  .card .title { font-weight: 800; font-size: 15.5px; }
+  .card .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; word-break: break-all; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: .04em; vertical-align: middle; margin-left: 6px; }
+  .badge.lead { background: rgba(0,224,138,.14); color: var(--green); }
+  .badge.prospect { background: rgba(167,139,250,.15); color: var(--purple); }
+  .score { font-weight: 800; font-size: 13px; padding: 3px 9px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border-2); white-space: nowrap; }
+  .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 16px; margin: 10px 0; font-size: 13.5px; }
+  .meta div { word-break: break-word; }
+  .meta b { color: var(--muted); font-weight: 600; font-size: 12px; display: block; }
+  .engines { display: flex; gap: 6px; flex-wrap: wrap; }
+  .eng { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); }
+  .eng.yes { color: var(--green); }
+  .eng.no { color: var(--red); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+  .actions select { padding: 6px 9px; font-size: 13px; }
+  .notes { margin-top: 8px; font-size: 13.5px; min-height: 38px; }
+  .draft { margin-top: 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  .draft input { width: 100%; margin-bottom: 8px; }
+  .draft textarea { min-height: 220px; font-size: 13.5px; }
+  .st-new { color: var(--blue); } .st-contacted { color: var(--orange); } .st-replied { color: var(--teal); } .st-won { color: var(--green); } .st-lost { color: var(--muted); }
+
+  #batch-urls { min-height: 150px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  .progress { height: 6px; background: var(--panel-2); border-radius: 6px; overflow: hidden; margin: 10px 0; }
+  .progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--teal), var(--green)); transition: width .3s; }
+  .brow { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: start; }
+  .brow input[type=checkbox] { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--green); }
+  .brow .em { width: 100%; max-width: 320px; margin-top: 6px; padding: 7px 9px; font-size: 13px; }
+  .err { color: var(--red); font-size: 13px; }
+  details.settings { margin-bottom: 14px; }
+  details.settings summary { cursor: pointer; color: var(--muted); font-size: 13.5px; }
+  details.settings .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin-top: 10px; }
+  details.settings label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  details.settings input { width: 100%; }
+  @media (max-width: 560px) { .brow { grid-template-columns: 22px 1fr; } .brow > .r { grid-column: 2; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="login" class="panel hidden">
+    <h1>Floorline AI — Lead Pipeline</h1>
+    <div class="muted small">Private. Enter your ADMIN_KEY.</div>
+    <form id="login-form"><input type="password" id="key-input" placeholder="ADMIN_KEY" autocomplete="current-password" /><button class="btn" type="submit">Open pipeline</button></form>
+    <div id="login-err" class="alert hidden"></div>
+  </div>
+
+  <div id="app" class="hidden">
+    <header>
+      <div class="brand"><div class="mark">F</div>Lead Pipeline <small>// Floorline AI</small></div>
+      <div class="row"><a class="btn ghost sm" href="admin-citation-test.html">AI citation test</a><a class="btn ghost sm" href="/" target="_blank" rel="noopener">Public audit</a><button class="btn ghost sm" id="logout">Lock</button></div>
+    </header>
+
+    <details class="settings">
+      <summary>Email signature settings (used in drafted emails)</summary>
+      <div class="grid">
+        <div><label for="s-name">Your name</label><input id="s-name" placeholder="Michael Smith" /></div>
+        <div><label for="s-phone">Phone</label><input id="s-phone" placeholder="480-388-1877" /></div>
+        <div><label for="s-addr">Business mailing address</label><input id="s-addr" placeholder="Required in cold emails (CAN-SPAM)" /></div>
+      </div>
+      <div class="muted small" style="margin-top:6px">Saved in this browser only.</div>
+    </details>
+
+    <div class="tabs">
+      <button class="tab on" data-tab="pipeline">Pipeline <span class="n" id="n-all">0</span></button>
+      <button class="tab" data-tab="batch">Batch outreach</button>
+    </div>
+
+    <div id="msg" class="alert hidden"></div>
+
+    <!-- PIPELINE -->
+    <section id="tab-pipeline">
+      <div class="stats" id="stats"></div>
+      <div class="filters">
+        <input id="q" placeholder="Search business, name, email, site…" />
+        <select id="f-type"><option value="">Leads + prospects</option><option value="lead">Leads (ran the audit)</option><option value="prospect">Prospects (you scanned)</option></select>
+        <button class="btn ghost" id="refresh">↻ Refresh</button>
+        <button class="btn ghost" id="export">⬇ CSV</button>
+      </div>
+      <div id="list"></div>
+      <div id="empty" class="panel muted hidden">Nothing here yet. Leads appear when someone runs the live AI check on the public audit. Use <b>Batch outreach</b> to add prospects.</div>
+    </section>
+
+    <!-- BATCH -->
+    <section id="tab-batch" class="hidden">
+      <div class="panel">
+        <div style="font-weight:800;margin-bottom:4px">Scan up to 25 businesses</div>
+        <div class="muted small" style="margin-bottom:10px">One website per line. Free — uses the same scan as the public audit (no paid AI calls). Each one gets a shareable report and a drafted email.</div>
+        <textarea id="batch-urls" placeholder="desertplumbing.com&#10;https://www.example-hvac.com&#10;bobstacos.com"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="batch-run">Scan all →</button>
+          <span class="muted small" id="batch-count"></span>
+        </div>
+        <div class="progress hidden" id="batch-prog"><i></i></div>
+      </div>
+      <div id="batch-tools" class="row hidden" style="margin:14px 0">
+        <label class="row small"><input type="checkbox" id="batch-all" checked /> Select all</label>
+        <button class="btn" id="batch-add">Add selected to pipeline</button>
+        <button class="btn ghost" id="batch-csv">⬇ CSV</button>
+      </div>
+      <div id="batch-list"></div>
+    </section>
+  </div>
+</div>
+
+<script type="module">
+import { parseUrlList, draftProspectEmail, draftLeadFollowup, mailtoHref, reportLink, domainOf, topIssue, toCSV } from "./assets/outreach.js";
+
+const API = "/api";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const store = {
+  get(k, def = "") { try { return localStorage.getItem(k) ?? sessionStorage.getItem(k) ?? def; } catch { return def; } },
+  set(k, v, session) { try { (session ? sessionStorage : localStorage).setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch {} },
+};
+
+let KEY = "";
+let rows = [];
+let statuses = ["new", "contacted", "replied", "won", "lost"];
+let statusFilter = "";
+let batch = [];
+
+function msg(text, ok) { const m = $("msg"); m.textContent = text; m.className = "alert" + (ok ? " ok" : ""); m.classList.toggle("hidden", !text); if (text && ok) setTimeout(() => m.classList.add("hidden"), 3500); }
+
+async function api(body) {
+  const r = await fetch(API + "/aeo-admin", { method: "POST", headers: { "Content-Type": "application/json", "x-admin-key": KEY }, body: JSON.stringify(body) });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { lock("That key didn't work."); throw new Error("unauthorized"); }
+  if (!r.ok) throw new Error(d.error || "Request failed (" + r.status + ")");
+  return d;
+}
+
+function sender() { return { name: $("s-name").value.trim() || "Michael Smith", phone: $("s-phone").value.trim() || "480-388-1877", address: $("s-addr").value.trim() }; }
+["s-name", "s-phone", "s-addr"].forEach((id) => { $(id).value = store.get("fl_" + id); $(id).addEventListener("input", () => store.set("fl_" + id, $(id).value)); });
+
+// ---------- auth ----------
+function lock(err) {
+  KEY = ""; store.del("fl_admin_key");
+  $("app").classList.add("hidden"); $("login").classList.remove("hidden");
+  $("login-err").textContent = err || ""; $("login-err").classList.toggle("hidden", !err);
+}
+$("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  KEY = $("key-input").value.trim(); if (!KEY) return;
+  try { await load(); store.set("fl_admin_key", KEY, true); $("login").classList.add("hidden"); $("app").classList.remove("hidden"); }
+  catch (x) { if (x.message !== "unauthorized") { $("login-err").textContent = x.message; $("login-err").classList.remove("hidden"); } }
+});
+$("logout").addEventListener("click", () => lock());
+
+// ---------- tabs ----------
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === t));
+  $("tab-pipeline").classList.toggle("hidden", t.dataset.tab !== "pipeline");
+  $("tab-batch").classList.toggle("hidden", t.dataset.tab !== "batch");
+}));
+
+// ---------- pipeline ----------
+async function load() {
+  const d = await api({ action: "list" });
+  rows = d.rows || []; statuses = d.statuses || statuses;
+  render();
+}
+$("refresh").addEventListener("click", () => load().then(() => msg("Refreshed.", true)).catch((e) => msg(e.message)));
+$("q").addEventListener("input", render);
+$("f-type").addEventListener("change", render);
+
+function filtered() {
+  const q = $("q").value.trim().toLowerCase();
+  const type = $("f-type").value;
+  return rows.filter((r) => (!type || r.type === type) && (!statusFilter || r.status === statusFilter) &&
+    (!q || [r.businessName, r.name, r.email, r.url, r.question, r.notes].some((v) => String(v || "").toLowerCase().includes(q))));
+}
+
+function scoreColor(s) { return s == null ? "var(--muted)" : s >= 75 ? "var(--green)" : s >= 45 ? "var(--orange)" : "var(--red)"; }
+function when(iso) { try { const d = new Date(iso); return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); } catch { return ""; } }
+
+function render() {
+  $("n-all").textContent = rows.length;
+  const counts = Object.fromEntries(statuses.map((s) => [s, rows.filter((r) => r.status === s).length]));
+  $("stats").innerHTML = `<div class="stat ${statusFilter ? "" : "on"}" data-s=""><b>${rows.length}</b><span>All</span></div>` +
+    statuses.map((s) => `<div class="stat ${statusFilter === s ? "on" : ""}" data-s="${s}"><b class="st-${s}">${counts[s]}</b><span>${s}</span></div>`).join("");
+  const list = filtered();
+  $("empty").classList.toggle("hidden", list.length > 0);
+  $("list").innerHTML = list.map(cardHtml).join("");
+}
+$("stats").addEventListener("click", (e) => { const s = e.target.closest(".stat"); if (!s) return; statusFilter = s.dataset.s; render(); });
+
+function cardHtml(r) {
+  const key = r.type + ":" + r.id;
+  const link = reportLink(r.reportId);
+  const eng = r.citation && r.citation.engines ? `<div class="engines">${r.citation.engines.map((e) => `<span class="eng ${e.ok ? (e.mentioned ? "yes" : "no") : ""}">${e.ok ? (e.mentioned ? "✓" : "✕") : "–"} ${esc(e.engine)}</span>`).join("")}</div>` : '<span class="muted">Not run</span>';
+  const contact = r.type === "lead"
+    ? `${esc(r.name)}<br><a href="mailto:${esc(r.email)}">${esc(r.email)}</a>${r.phone ? `<br><a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>` : ""}`
+    : (r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : '<span class="muted">No email found — check their contact page</span>');
+  return `<div class="card" data-key="${esc(key)}">
+    <div class="head">
+      <div><div class="title">${esc(r.businessName || domainOf(r.url) || "Unknown")}<span class="badge ${r.type}">${r.type}</span></div>
+        <div class="sub">${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(domainOf(r.url))}</a> · ` : ""}${esc(when(r.createdAt))}</div></div>
+      <span class="score" style="color:${scoreColor(r.score)}">${r.score == null ? "No score" : r.score + "/100 · " + esc(r.grade)}</span>
+    </div>
+    <div class="meta">
+      <div><b>Contact</b>${contact}</div>
+      ${r.type === "lead" ? `<div><b>Question asked</b>${esc(r.question || "—")}</div><div><b>Live AI check</b>${eng}</div>` : ""}
+      ${r.topIssue ? `<div><b>Top issue</b>${esc(r.topIssue)}</div>` : ""}
+    </div>
+    <div class="actions">
+      <select data-act="status" class="st-${esc(r.status)}">${statuses.map((s) => `<option value="${s}" ${s === r.status ? "selected" : ""}>${s}</option>`).join("")}</select>
+      <button class="btn ghost sm" data-act="draft">✉ Draft email</button>
+      ${link ? `<a class="btn ghost sm" href="${esc(link)}" target="_blank" rel="noopener">Report ↗</a>` : ""}
+      ${r.type === "prospect" ? `<button class="btn danger sm" data-act="delete">Delete</button>` : ""}
+    </div>
+    <textarea class="notes" data-act="notes" placeholder="Notes (saves when you click away)">${esc(r.notes)}</textarea>
+    <div class="draft hidden"></div>
+  </div>`;
+}
+
+function findRow(card) { const [type, ...rest] = card.dataset.key.split(":"); const id = rest.join(":"); return rows.find((r) => r.type === type && r.id === id); }
+
+$("list").addEventListener("change", async (e) => {
+  const el = e.target; const card = el.closest(".card"); if (!card) return;
+  const r = findRow(card);
+  if (el.dataset.act === "status") {
+    try { await api({ action: "update", type: r.type, id: r.id, status: el.value }); r.status = el.value; el.className = "st-" + el.value; render(); msg("Status saved.", true); }
+    catch (x) { msg(x.message); el.value = r.status; }
+  }
+});
+$("list").addEventListener("focusout", async (e) => {
+  const el = e.target; if (el.dataset.act !== "notes") return;
+  const r = findRow(el.closest(".card"));
+  if (el.value === (r.notes || "")) return;
+  try { await api({ action: "update", type: r.type, id: r.id, notes: el.value }); r.notes = el.value; msg("Notes saved.", true); }
+  catch (x) { msg(x.message); }
+});
+$("list").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const card = b.closest(".card"); const r = findRow(card);
+  if (b.dataset.act === "draft") {
+    const box = card.querySelector(".draft");
+    if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }
+    const d = r.type === "lead" ? draftLeadFollowup({ lead: r, sender: sender() }) : draftProspectEmail({ scan: prospectAsScan(r), sender: sender() });
+    showDraft(box, r.email, d);
+  }
+  if (b.dataset.act === "delete") {
+    if (!confirm("Delete " + (r.businessName || r.url) + " from the pipeline?")) return;
+    try { await api({ action: "delete", type: "prospect", id: r.id }); rows = rows.filter((x) => x !== r); render(); msg("Deleted.", true); }
+    catch (x) { msg(x.message); }
+  }
+});
+
+// Prospects only keep a summary; rebuild enough of a scan for the email draft.
+function prospectAsScan(p) { return { url: p.url, businessName: p.businessName, reportId: p.reportId, score: p.score == null ? null : { overall: p.score, grade: p.grade, findings: p.topIssue ? [{ severity: "high", text: p.topIssue }] : [] } }; }
+
+function showDraft(box, to, d) {
+  box.innerHTML = `<input class="d-to" placeholder="To (email)" value="${esc(to || "")}" /><input class="d-subj" value="${esc(d.subject)}" /><textarea class="d-body">${esc(d.body)}</textarea>
+    <div class="actions"><button class="btn sm" data-d="mail">Open in email app</button><button class="btn ghost sm" data-d="copy">Copy text</button></div>`;
+  box.classList.remove("hidden");
+  box.onclick = async (e) => {
+    const b = e.target.closest("[data-d]"); if (!b) return;
+    const to2 = box.querySelector(".d-to").value.trim(), subject = box.querySelector(".d-subj").value, body = box.querySelector(".d-body").value;
+    if (b.dataset.d === "mail") { location.href = mailtoHref(to2, { subject, body }); }
+    else { await copyText("Subject: " + subject + "\n\n" + body); b.textContent = "Copied ✓"; setTimeout(() => (b.textContent = "Copy text"), 1500); }
+  };
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); }
+  catch { const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } catch {} ta.remove(); }
+}
+function download(name, text) {
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+$("export").addEventListener("click", () => {
+  download("floorline-pipeline-" + new Date().toISOString().slice(0, 10) + ".csv", toCSV(filtered(), [
+    { label: "Type", key: "type" }, { label: "Status", key: "status" }, { label: "Business", key: "businessName" }, { label: "Website", key: "url" },
+    { label: "Contact name", key: "name" }, { label: "Email", key: "email" }, { label: "Phone", key: "phone" }, { label: "Score", key: "score" }, { label: "Grade", key: "grade" },
+    { label: "Question", key: "question" }, { label: "AI engines naming them", get: (r) => (r.citation ? r.citation.mentioning + "/" + r.citation.answered : "") },
+    { label: "Top issue", key: "topIssue" }, { label: "Report", get: (r) => reportLink(r.reportId) }, { label: "Notes", key: "notes" }, { label: "Created", key: "createdAt" },
+  ]));
+});
+
+// ---------- batch ----------
+$("batch-urls").addEventListener("input", () => { const n = parseUrlList($("batch-urls").value).length; $("batch-count").textContent = n ? n + " site" + (n > 1 ? "s" : "") + " (max 25)" : ""; });
+
+$("batch-run").addEventListener("click", async () => {
+  const urls = parseUrlList($("batch-urls").value);
+  if (!urls.length) { msg("Add at least one website address."); return; }
+  msg("");
+  batch = urls.map((u) => ({ input: u, state: "pending" }));
+  $("batch-run").disabled = true; $("batch-prog").classList.remove("hidden"); $("batch-tools").classList.add("hidden");
+  renderBatch();
+  let done = 0, next = 0;
+  async function worker() {
+    while (next < batch.length) {
+      const item = batch[next++];
+      item.state = "running"; renderBatch();
+      try {
+        const r = await fetch(API + "/aeo-audit?url=" + encodeURIComponent(item.input));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || "Scan failed");
+        if (d.homepageFetchFailed) throw new Error("Site didn't load (down, wrong address, or blocks bots)");
+        item.scan = d; item.email = (d.contactEmails || [])[0] || ""; item.state = "done"; item.checked = true;
+      } catch (x) { item.state = "error"; item.error = x.message; }
+      done++; $("batch-prog").firstElementChild.style.width = Math.round((done / batch.length) * 100) + "%";
+      renderBatch();
+    }
+  }
+  await Promise.all([worker(), worker(), worker()]);
+  $("batch-run").disabled = false;
+  $("batch-tools").classList.toggle("hidden", !batch.some((b) => b.scan));
+  const ok = batch.filter((b) => b.scan).length;
+  msg(`Scanned ${ok} of ${batch.length}. Review each email, then add them to your pipeline.`, true);
+});
+
+function renderBatch() {
+  $("batch-list").innerHTML = batch.map((b, i) => {
+    if (b.state !== "done") {
+      return `<div class="card"><div class="title">${esc(domainOf(b.input))}</div><div class="sub">${b.state === "error" ? `<span class="err">✕ ${esc(b.error)}</span>` : b.state === "running" ? "Scanning…" : "Waiting…"}</div></div>`;
+    }
+    const s = b.scan;
+    return `<div class="card" data-i="${i}"><div class="brow">
+      <input type="checkbox" data-b="check" ${b.checked ? "checked" : ""} aria-label="Select" />
+      <div><div class="title">${esc(s.businessName || domainOf(s.url))}</div>
+        <div class="sub"><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(domainOf(s.url))}</a>${s.reportId ? ` · <a href="${esc(reportLink(s.reportId))}" target="_blank" rel="noopener">report ↗</a>` : ""}</div>
+        <div class="small" style="margin-top:6px">${esc(topIssue(s) || "No major issues")}</div>
+        <input class="em" data-b="email" type="email" placeholder="Email (none found on homepage)" value="${esc(b.email)}" /></div>
+      <div class="r"><span class="score" style="color:${scoreColor(s.score.overall)}">${s.score.overall}/100 · ${esc(s.score.grade)}</span>
+        <div style="margin-top:8px"><button class="btn ghost sm" data-b="draft">✉ Draft</button></div></div>
+    </div><div class="draft hidden"></div></div>`;
+  }).join("");
+}
+$("batch-list").addEventListener("change", (e) => {
+  const card = e.target.closest("[data-i]"); if (!card) return; const b = batch[Number(card.dataset.i)];
+  if (e.target.dataset.b === "check") b.checked = e.target.checked;
+});
+$("batch-list").addEventListener("input", (e) => {
+  const card = e.target.closest("[data-i]"); if (!card) return;
+  if (e.target.dataset.b === "email") batch[Number(card.dataset.i)].email = e.target.value.trim();
+});
+$("batch-list").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-b=draft]"); if (!btn) return;
+  const card = btn.closest("[data-i]"); const b = batch[Number(card.dataset.i)];
+  const box = card.querySelector(".draft");
+  if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }
+  showDraft(box, b.email, draftProspectEmail({ scan: b.scan, sender: sender() }));
+});
+$("batch-all").addEventListener("change", (e) => { batch.forEach((b) => { if (b.scan) b.checked = e.target.checked; }); renderBatch(); });
+
+$("batch-add").addEventListener("click", async () => {
+  const pick = batch.filter((b) => b.scan && b.checked);
+  if (!pick.length) { msg("Select at least one scanned site."); return; }
+  $("batch-add").disabled = true;
+  try {
+    const d = await api({ action: "addProspects", prospects: pick.map((b) => ({ url: b.scan.url, businessName: b.scan.businessName, email: b.email, score: b.scan.score.overall, grade: b.scan.score.grade, topIssue: topIssue(b.scan), reportId: b.scan.reportId })) });
+    await load();
+    msg(`Added ${d.added.length} new${d.updated.length ? `, updated ${d.updated.length} already in your pipeline` : ""}.`, true);
+  } catch (x) { msg(x.message); }
+  finally { $("batch-add").disabled = false; }
+});
+$("batch-csv").addEventListener("click", () => {
+  const s = sender();
+  download("floorline-batch-" + new Date().toISOString().slice(0, 10) + ".csv", toCSV(batch.filter((b) => b.scan), [
+    { label: "Business", get: (b) => b.scan.businessName }, { label: "Website", get: (b) => b.scan.url }, { label: "Email", key: "email" },
+    { label: "Score", get: (b) => b.scan.score.overall }, { label: "Grade", get: (b) => b.scan.score.grade }, { label: "Top issue", get: (b) => topIssue(b.scan) },
+    { label: "Report", get: (b) => reportLink(b.scan.reportId) },
+    { label: "Email subject", get: (b) => draftProspectEmail({ scan: b.scan, sender: s }).subject },
+    { label: "Email body", get: (b) => draftProspectEmail({ scan: b.scan, sender: s }).body },
+  ]));
+});
+
+// ---------- boot ----------
+KEY = store.get("fl_admin_key");
+if (KEY) load().then(() => $("app").classList.remove("hidden")).catch((x) => { if (x.message !== "unauthorized") lock(x.message); });
+else lock();
+</script>
+</body>
+</html>

@@ -218,6 +218,26 @@ export function analyzeTechnical({ html, headers, origin }) {
   };
 }
 
+// Public contact emails the business itself lists on its homepage (mailto:
+// links first, then plain-text addresses). Used by the admin outreach tool.
+const JUNK_EMAIL_RE = /(example\.|sentry|wixpress|domain\.com|yourdomain|email\.com|@sentry|noreply|no-reply|\.png|\.jpg|\.gif|\.webp|\.svg)/i;
+export function extractContactEmails(html) {
+  const h = String(html || "");
+  const found = [];
+  const add = (e) => {
+    const v = decodeEntities(String(e || "")).trim().toLowerCase().replace(/^mailto:/, "").split("?")[0];
+    if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(v) || JUNK_EMAIL_RE.test(v) || found.includes(v)) return;
+    found.push(v);
+  };
+  for (const m of h.matchAll(/href=["']mailto:([^"']+)["']/gi)) {
+    let v = m[1];
+    try { v = decodeURIComponent(v); } catch { /* malformed escape: use as-is */ }
+    add(v);
+  }
+  for (const m of visibleText(h).matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)) add(m[0]);
+  return found.slice(0, 3);
+}
+
 // ---------------------------------------------------------------------------
 // Scoring
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@
 // the scan itself).
 import { getStore } from "@netlify/blobs";
 import {
-  checkAllBots, robotsSitemaps, extractJsonLd, typesOf, analyzeContentFormat, analyzeTechnical,
+  checkAllBots, robotsSitemaps, extractJsonLd, extractContactEmails, typesOf, analyzeContentFormat, analyzeTechnical,
   computeScore, buildFixKit, guessBusinessName, detectEdgeBlock, normalizeOrigin, isPrivateHost,
 } from "../lib/aeo-core.js";
 
@@ -124,6 +124,7 @@ export default async (request) => {
       phoneFound: !!technical.phone, addressVisible: technical.addressVisible,
     },
     llmsTxtPresent,
+    contactEmails: html ? extractContactEmails(html) : [],
     edgeBlock,
     score,
     fixKit,
