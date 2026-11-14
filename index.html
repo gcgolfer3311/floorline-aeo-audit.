@@ -39,8 +39,9 @@
       "@type": "FAQPage",
       "mainEntity": [
         { "@type": "Question", "name": "What is an AI visibility audit?", "acceptedAnswer": { "@type": "Answer", "text": "It checks whether AI assistants like ChatGPT, Claude, Perplexity and Google AI Overviews can reach your website, understand who you are, and recommend you when customers ask for a business like yours." } },
-        { "@type": "Question", "name": "Is the audit really free?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. The technical scan is free with no signup. The live AI answer check is free too — it asks for your email so we can send the results and limit abuse." } },
+        { "@type": "Question", "name": "Is the audit really free?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. The technical scan is free with no signup. The live AI answer check is free too — it asks for your email so we can follow up and limit abuse." } },
         { "@type": "Question", "name": "What is AEO?", "acceptedAnswer": { "@type": "Answer", "text": "AEO (answer engine optimization) is making your business easy for AI answer engines to find, read, trust and cite — the AI-era version of SEO." } },
+        { "@type": "Question", "name": "How much does it cost to fix?", "acceptedAnswer": { "@type": "Answer", "text": "The AI Visibility Fix is $397 one-time — we fix everything on your report and re-test. Ongoing AI Visibility Monitoring is $197/month, cancel anytime. Or apply the free fix kit yourself." } },
         { "@type": "Question", "name": "Can you guarantee ChatGPT will recommend my business?", "acceptedAnswer": { "@type": "Answer", "text": "No one can guarantee that. AI answers vary from run to run. What we can do is remove every technical barrier, make your business information clear and consistent, and track how often you're mentioned over time." } }
       ]
     }
@@ -198,6 +199,19 @@
   .closer p { color: var(--muted); margin: 0 auto 18px; max-width: 560px; line-height: 1.55; font-size: 14.5px; }
   .closer .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 
+  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .plan { background: var(--panel); border: 1px solid var(--border-2); border-radius: 16px; padding: 22px; display: flex; flex-direction: column; position: relative; }
+  .plan.featured { border-color: rgba(0,224,138,0.55); background: linear-gradient(160deg, rgba(0,224,138,0.08), transparent 55%), var(--panel); }
+  .plan .tag { position: absolute; top: -11px; left: 20px; background: var(--green); color: #06110c; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; }
+  .plan h3 { margin: 0 0 4px; font-size: 18px; }
+  .plan .price { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; margin: 6px 0 2px; }
+  .plan .price small { font-size: 14px; color: var(--muted); font-weight: 600; letter-spacing: 0; }
+  .plan .for { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; line-height: 1.5; }
+  .plan ul { list-style: none; padding: 0; margin: 0 0 18px; font-size: 14px; line-height: 1.5; flex: 1; }
+  .plan li { padding: 5px 0 5px 22px; position: relative; }
+  .plan li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 800; }
+  .plan .btn { width: 100%; }
+  .plans-note { color: var(--muted); font-size: 13px; text-align: center; margin-top: 14px; line-height: 1.6; }
   .faq h3 { font-size: 15.5px; margin: 18px 0 6px; }
   .faq p { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 0; }
 
@@ -206,7 +220,7 @@
 
   @media print {
     body { background: #fff; color: #111826; }
-    .no-print, header.top .top-cta, form.scan, .chips, .how, .actions, .cite-card form, .closer .row, footer .np { display: none !important; }
+    .no-print, header.top .top-cta, form.scan, .chips, .how, .actions, .cite-card form, .closer .row, footer .np, #pricing { display: none !important; }
     .score-card, .subscore, .finding, .engine, .fix, details.more, .closer, .cite-card { background: #f4f6f9 !important; border-color: #d7dde6 !important; color: #111826 !important; }
     details.more .body { display: block !important; }
     .fix pre { color: #0b3d2e; white-space: pre-wrap; }
@@ -288,14 +302,14 @@
         <form id="lead-form" novalidate>
           <div class="grid2">
             <div><label class="lbl" for="lf-name">Your name</label><input class="field" id="lf-name" autocomplete="name" required /></div>
-            <div><label class="lbl" for="lf-email">Email (results are sent here)</label><input class="field" id="lf-email" type="email" autocomplete="email" required /></div>
+            <div><label class="lbl" for="lf-email">Email</label><input class="field" id="lf-email" type="email" autocomplete="email" required /></div>
             <div><label class="lbl" for="lf-biz">Business name</label><input class="field" id="lf-biz" autocomplete="organization" required /></div>
             <div><label class="lbl" for="lf-phone">Phone (optional)</label><input class="field" id="lf-phone" type="tel" autocomplete="tel" /></div>
             <div class="full"><label class="lbl" for="lf-q">What would a customer ask an AI to find you?</label><input class="field" id="lf-q" placeholder="e.g. best HVAC company in Mesa AZ" required maxlength="200" /></div>
           </div>
           <div class="hp" aria-hidden="true"><label>Leave blank <input id="lf-website" tabindex="-1" autocomplete="off" /></label></div>
           <div style="margin-top:14px"><button class="btn" type="submit" id="lead-btn">Run the live AI check →</button></div>
-          <div class="fine">Free. Takes about 20 seconds. We'll email you a copy — no spam, no sharing your info.</div>
+          <div class="fine">Free. Takes about 20 seconds. We'll follow up personally with what to fix — no spam, and we never share your info.</div>
         </form>
         <div id="cite-status" class="hidden">
           <div class="scanline"><ol id="cite-steps"><li>Asking ChatGPT…</li><li>Asking Claude…</li><li>Asking Perplexity…</li><li>Asking Gemini…</li></ol><div class="bar"><i></i></div></div>
@@ -329,7 +343,7 @@
         <h2 id="closer-title">Want this fixed for you?</h2>
         <p id="closer-text">Floorline AI fixes every item on this report, sets up your business data across the sources AI engines trust, and re-tests monthly so you can see your AI mentions grow.</p>
         <div class="row">
-          <a class="btn" id="book-btn" href="https://floorlineai.com/#contact">Get it fixed →</a>
+          <a class="btn" id="book-btn" href="#pricing">See fix options →</a>
           <a class="btn ghost" href="tel:+14803881877">Call 480-388-1877</a>
           <a class="btn ghost" href="mailto:Floorlineai@gmail.com?subject=AI%20Visibility%20Audit">Email us</a>
         </div>
@@ -337,14 +351,51 @@
     </section>
   </div>
 
+  <section class="block" id="pricing">
+    <h2>Fix it — or keep it fixed</h2>
+    <p class="lede">Flat prices. No long-term contracts.</p>
+    <div class="plans">
+      <div class="plan">
+        <h3>AI Visibility Fix</h3>
+        <div class="price">$397 <small>one-time</small></div>
+        <p class="for">We fix everything on your report, done for you.</p>
+        <ul>
+          <li>Let every major AI crawler in (robots.txt + firewall check)</li>
+          <li>Business schema: name, address, phone, hours, service area</li>
+          <li>FAQ section + FAQ schema written for your customers</li>
+          <li>Google Business Profile consistency check</li>
+          <li>Re-scan + live AI check after the fixes</li>
+        </ul>
+        <a class="btn" href="#" data-plan="fix">Get the Fix →</a>
+      </div>
+      <div class="plan featured">
+        <span class="tag">Best results</span>
+        <h3>AI Visibility Monitor</h3>
+        <div class="price">$197 <small>/ month</small></div>
+        <p class="for">Stay recommended as AI answers change.</p>
+        <ul>
+          <li>Monthly live check on ChatGPT, Claude, Perplexity &amp; Gemini</li>
+          <li>Up to 3 customer questions tracked each month</li>
+          <li>Fixes for anything that slips</li>
+          <li>Monthly report: who AI recommends, and whether it's you</li>
+          <li>Cancel anytime</li>
+        </ul>
+        <a class="btn" href="#" data-plan="monitor">Start Monitoring →</a>
+      </div>
+    </div>
+    <p class="plans-note">Site built with JavaScript, too thin, or outdated? We rebuild sites from $800 flat.<br>Questions first? Call <a href="tel:+14803881877">480-388-1877</a> or <a href="mailto:Floorlineai@gmail.com?subject=AI%20Visibility%20question">email us</a>.</p>
+  </section>
+
   <section class="block faq" id="faq">
     <h2>Questions</h2>
     <h3>What is an AI visibility audit?</h3>
     <p>It checks whether AI assistants like ChatGPT, Claude, Perplexity and Google AI Overviews can reach your website, understand who you are, and recommend you when customers ask for a business like yours.</p>
     <h3>Is the audit really free?</h3>
-    <p>Yes. The technical scan is free with no signup. The live AI answer check is free too — it asks for your email so we can send the results and limit abuse.</p>
+    <p>Yes. The technical scan is free with no signup. The live AI answer check is free too — it asks for your email so we can follow up and limit abuse.</p>
     <h3>What is AEO?</h3>
     <p>AEO (answer engine optimization) is making your business easy for AI answer engines to find, read, trust and cite — the AI-era version of SEO.</p>
+    <h3>How much does it cost to fix?</h3>
+    <p>The AI Visibility Fix is $397 one-time — we fix everything on your report and re-test. Ongoing AI Visibility Monitoring is $197/month, cancel anytime. Or apply the free fix kit yourself.</p>
     <h3>Can you guarantee ChatGPT will recommend my business?</h3>
     <p>No one can guarantee that. AI answers vary from run to run. What we can do is remove every technical barrier, make your business information clear and consistent, and track how often you're mentioned over time.</p>
   </section>
@@ -369,6 +420,34 @@
   var SEV = { critical: "Critical", high: "Important", info: "Note", good: "Good" };
   var MAX = { crawlerAccess: 30, technical: 20, structuredData: 30, content: 20 };
   var current = null, reportUrl = "", leadToken = null;
+
+  // ===== PAYMENT LINKS — paste your Stripe Payment Link URLs here =====
+  // Stripe Dashboard → Payment Links → Create → copy the https://buy.stripe.com/... link.
+  // Leave "" and the button opens a pre-filled email to you instead.
+  var PAY_LINKS = {
+    fix: "",      // $397 one-time
+    monitor: ""   // $197 / month (recurring)
+  };
+  var PLAN_NAMES = { fix: "AI Visibility Fix ($397)", monitor: "AI Visibility Monitor ($197/mo)" };
+
+  function planHref(plan) {
+    var link = PAY_LINKS[plan] || "";
+    var email = ($("lf-email") && $("lf-email").value.trim()) || "";
+    if (/^https:\/\/(buy|checkout)\.stripe\.com\//.test(link)) {
+      var q = [];
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) q.push("prefilled_email=" + encodeURIComponent(email));
+      if (current && current.reportId) q.push("client_reference_id=" + encodeURIComponent("aeo_" + current.reportId));
+      return link + (q.length ? (link.indexOf("?") === -1 ? "?" : "&") + q.join("&") : "");
+    }
+    var body = "I'd like the " + PLAN_NAMES[plan] + ".\n\nWebsite: " + (current ? current.url : "") + (reportUrl ? "\nReport: " + reportUrl : "") + "\n\nBest number to reach me: ";
+    return "mailto:Floorlineai@gmail.com?subject=" + encodeURIComponent(PLAN_NAMES[plan] + (current ? " — " + current.url : "")) + "&body=" + encodeURIComponent(body);
+  }
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest("[data-plan]");
+    if (!a) return;
+    a.href = planHref(a.getAttribute("data-plan"));
+    if (/^https:/.test(a.href)) { a.target = "_blank"; a.rel = "noopener"; } else { a.removeAttribute("target"); }
+  }, true);
 
   var $ = function (id) { return document.getElementById(id); };
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
